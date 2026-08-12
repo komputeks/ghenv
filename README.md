@@ -1,11 +1,8 @@
 # ghenv
 
-Simple dotenv-to-GitHub-secrets uploader for GitHub CLI.
+Simple dotenv-to-GitHub-secrets-and-variables CLI for GitHub CLI.
 
-`ghenv` is a small Bash wrapper around `gh secret set`.
-
-It lets you maintain secrets in a local dotenv file and upload the entire
-file to GitHub without manually running `gh secret set` for every variable.
+`ghenv` is a small Bash wrapper around `gh` for pushing and pulling GitHub secrets and variables.
 
 ## Requirements
 
@@ -19,109 +16,85 @@ Check authentication:
 
 ## Install
 
-Run:
-
     curl -fsSL https://raw.githubusercontent.com/komputeks/ghenv/main/install.sh | bash
 
 Then:
 
     ghenv version
 
-## dotenv file
+## Push
 
-Example:
-
-    API_KEY=123
-    BLA_BLA=456
-    DATABASE_URL=postgres://example
-
-Do not commit this file to Git.
-
-## Repository secrets
-
-Upload everything as repository secrets:
+Repository secrets (default):
 
     ghenv push \
       --repo OWNER/REPO \
       --file /sdcard/secrets.env
 
-## Environment secrets
+Repository variables:
 
-Upload to a GitHub Actions environment:
+    ghenv push \
+      --repo OWNER/REPO \
+      --file /sdcard/vars.env \
+      --type variable
+
+Environment secrets:
 
     ghenv push \
       --repo OWNER/REPO \
       --file /sdcard/secrets.env \
       --env production
 
-For example:
+If the environment does not exist, `ghenv push` creates it first.
 
-    ghenv push \
-      --repo komputeks/myapp \
-      --file /sdcard/secrets.env \
-      --env production
+Application-specific targets:
 
-## Application-specific secrets
+    ghenv push --repo OWNER/REPO --file /sdcard/secrets.env --app actions
+    ghenv push --repo OWNER/REPO --file /sdcard/secrets.env --app agents
+    ghenv push --repo OWNER/REPO --file /sdcard/secrets.env --app codespaces
+    ghenv push --repo OWNER/REPO --file /sdcard/secrets.env --app dependabot
 
-GitHub supports application-specific secrets.
+## Pull
 
-Actions:
+Secret pulls retrieve names only:
+
+    ghenv pull \
+      --repo OWNER/REPO \
+      --file /sdcard/secrets.env
+
+Result:
+
+    API_KEY=
+    DATABASE_PASSWORD=
+
+Variable pulls retrieve names and values:
+
+    ghenv pull \
+      --repo OWNER/REPO \
+      --file /sdcard/vars.env \
+      --type variable
+
+If the destination file already exists, `pull` refuses to overwrite it unless `--force` is supplied.
+
+    ghenv pull \
+      --repo OWNER/REPO \
+      --file /sdcard/vars.env \
+      --type variable \
+      --force
+
+A missing environment is an error for `pull`; it is never created automatically.
+
+## Dry run
 
     ghenv push \
       --repo OWNER/REPO \
       --file /sdcard/secrets.env \
-      --app actions
-
-Agents:
-
-    ghenv push \
-      --repo OWNER/REPO \
-      --file /sdcard/secrets.env \
-      --app agents
-
-Dependabot:
-
-    ghenv push \
-      --repo OWNER/REPO \
-      --file /sdcard/secrets.env \
-      --app dependabot
-
-Codespaces:
-
-    ghenv push \
-      --repo OWNER/REPO \
-      --file /sdcard/secrets.env \
-      --app codespaces
-
-## Organization secrets
-
-For organization-level secrets:
-
-    ghenv push \
-      --org ORGANIZATION \
-      --file /sdcard/secrets.env \
-      --app actions
-
-or:
-
-    ghenv push \
-      --org ORGANIZATION \
-      --file /sdcard/secrets.env \
-      --app codespaces
+      --dry-run
 
 ## Security
 
-The dotenv file is never uploaded as a normal GitHub file.
+Secret values are never retrieved by `ghenv pull`. Secret pulls write names with empty values.
 
-`gh` encrypts secret values before sending them to GitHub.
-
-Never commit your `.env` or `secrets.env` file to a repository.
-
-Add it to `.gitignore`:
-
-    *.env
-    .env
-    secrets.env
+Never commit `.env` or `secrets.env` files.
 
 ## License
 

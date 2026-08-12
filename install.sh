@@ -17,8 +17,7 @@ curl -fsSL \
 chmod +x "$TARGET"
 
 case ":$PATH:" in
-    *":$INSTALL_DIR:"*)
-        ;;
+    *":$INSTALL_DIR:"*) ;;
     *)
         echo
         echo "Add this to ~/.bashrc:"

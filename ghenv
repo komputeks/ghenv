@@ -2,19 +2,23 @@
 
 set -e
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 
 usage() {
     cat <<EOF
 ghenv v$VERSION
 
-Upload dotenv files to GitHub secrets using GitHub CLI.
+Push and pull GitHub secrets and variables using GitHub CLI.
 
 Usage:
   ghenv push --repo OWNER/REPO --file FILE
+  ghenv push --repo OWNER/REPO --file FILE --type variable
   ghenv push --repo OWNER/REPO --file FILE --env ENVIRONMENT
   ghenv push --repo OWNER/REPO --file FILE --app APP
-  ghenv push --org ORG --file FILE --app APP
+  ghenv pull --repo OWNER/REPO --file FILE
+  ghenv pull --repo OWNER/REPO --file FILE --type variable
+  ghenv pull --repo OWNER/REPO --file FILE --env ENVIRONMENT
+  ghenv pull --repo OWNER/REPO --file FILE --app APP
   ghenv version
   ghenv help
 
@@ -24,26 +28,30 @@ Options:
   --file FILE           dotenv file
   --env ENV             GitHub environment
   --app APP             actions|agents|codespaces|dependabot
+  --type TYPE           secret|variable
+  --force               Allow pull to overwrite an existing file
+  --dry-run             Show planned changes without making them
 
-Examples:
+Push examples:
 
   ghenv push --repo OWNER/REPO --file /sdcard/secrets.env
 
-  ghenv push --repo OWNER/REPO \
-    --file /sdcard/secrets.env \
-    --env production
+  ghenv push --repo OWNER/REPO --file /sdcard/vars.env --type variable
 
-  ghenv push --repo OWNER/REPO \
-    --file /sdcard/secrets.env \
-    --app dependabot
+  ghenv push --repo OWNER/REPO --file /sdcard/secrets.env --env staging
 
-  ghenv push --repo OWNER/REPO \
-    --file /sdcard/secrets.env \
-    --app actions
+Pull examples:
 
-  ghenv push --org OWNER \
-    --file /sdcard/secrets.env \
-    --app codespaces
+  ghenv pull --repo OWNER/REPO --file /sdcard/secrets.env
+
+  ghenv pull --repo OWNER/REPO --file /sdcard/vars.env --type variable
+
+Secret pulls write names only:
+  API_KEY=
+  DATABASE_PASSWORD=
+
+Variable pulls write names and values:
+  API_URL=https://example.com
 EOF
 }
 
@@ -54,24 +62,21 @@ die() {
 
 command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) is not installed."
 
-case "${1:-}" in
-
+ACTION="${1:-}"
+case "$ACTION" in
     version)
         echo "ghenv v$VERSION"
         exit 0
         ;;
-
     help|"")
         usage
         exit 0
         ;;
-
-    push)
+    push|pull)
         shift
         ;;
-
     *)
-        die "unknown command: $1"
+        die "unknown command: $ACTION"
         ;;
 esac
 
@@ -80,124 +85,196 @@ ORG=""
 FILE=""
 ENVIRONMENT=""
 APP=""
+TYPE="secret"
+FORCE=0
+DRY_RUN=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-
         --repo|-R)
             [ $# -ge 2 ] || die "--repo requires OWNER/REPO"
             REPO="$2"
             shift 2
             ;;
-
         --org)
             [ $# -ge 2 ] || die "--org requires an organization"
             ORG="$2"
             shift 2
             ;;
-
         --file|-f)
             [ $# -ge 2 ] || die "--file requires a file"
             FILE="$2"
             shift 2
             ;;
-
         --env|-e)
             [ $# -ge 2 ] || die "--env requires an environment name"
             ENVIRONMENT="$2"
             shift 2
             ;;
-
         --app|-a)
             [ $# -ge 2 ] || die "--app requires actions, agents, codespaces, or dependabot"
             APP="$2"
             shift 2
             ;;
-
+        --type|-t)
+            [ $# -ge 2 ] || die "--type requires secret or variable"
+            TYPE="$2"
+            shift 2
+            ;;
+        --force)
+            FORCE=1
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=1
+            shift
+            ;;
         --help|-h)
             usage
             exit 0
             ;;
-
         *)
             die "unknown option: $1"
             ;;
     esac
 done
 
-[ -n "$FILE" ] || die "missing --file"
-[ -f "$FILE" ] || die "file not found: $FILE"
-
-[ -n "$REPO" ] && [ -n "$ORG" ] && \
-    die "use either --repo or --org, not both"
-
-[ -n "$ENVIRONMENT" ] && [ -z "$REPO" ] && \
-    die "--env requires --repo"
-
-[ -n "$ENVIRONMENT" ] && [ -n "$APP" ] && \
-    die "--env and --app cannot be used together"
-
-[ -n "$APP" ] || [ -n "$ORG" ] || [ -n "$REPO" ] || \
-    die "specify --repo or --org"
+[ -n "$REPO" ] && [ -n "$ORG" ] && die "use either --repo or --org, not both"
+[ -n "$ENVIRONMENT" ] && [ -z "$REPO" ] && die "--env requires --repo"
+[ -n "$ENVIRONMENT" ] && [ -n "$APP" ] && die "--env and --app cannot be used together"
+[ -n "$APP" ] && [ -n "$ORG" ] && die "--app cannot be combined with --org in v1.0.2"
+[ "$TYPE" = "secret" ] || [ "$TYPE" = "variable" ] || die "invalid --type: $TYPE"
 
 case "$APP" in
-    "")
-        ;;
-    actions|agents|codespaces|dependabot)
-        ;;
-    *)
-        die "invalid --app: $APP"
-        ;;
+    ""|actions|agents|codespaces|dependabot) ;;
+    *) die "invalid --app: $APP" ;;
 esac
 
-echo "ghenv v$VERSION"
-echo
-echo "Source: $FILE"
+[ -n "$REPO" ] || [ -n "$ORG" ] || die "specify --repo or --org"
+[ -n "$FILE" ] || die "missing --file"
 
-if [ -n "$REPO" ]; then
-    echo "Target: repository $REPO"
-elif [ -n "$ORG" ]; then
-    echo "Target: organization $ORG"
-fi
-
-if [ -n "$ENVIRONMENT" ]; then
-    echo "Environment: $ENVIRONMENT"
-fi
-
-if [ -n "$APP" ]; then
-    echo "Application: $APP"
-fi
-
-echo
-
-if [ -n "$REPO" ]; then
-
-    ARGS=(secret set -f "$FILE" --repo "$REPO")
-
-    if [ -n "$ENVIRONMENT" ]; then
-        ARGS+=(--env "$ENVIRONMENT")
-    fi
-
-    if [ -n "$APP" ]; then
-        ARGS+=(--app "$APP")
-    fi
-
-elif [ -n "$ORG" ]; then
-
-    ARGS=(secret set -f "$FILE" --org "$ORG")
-
-    if [ -n "$APP" ]; then
-        ARGS+=(--app "$APP")
-    fi
-
+if [ "$ACTION" = "push" ]; then
+    [ -f "$FILE" ] || die "file not found: $FILE"
 else
-    die "no target specified"
+    if [ -e "$FILE" ] && [ "$FORCE" -ne 1 ]; then
+        die "file already exists: $FILE (use --force to overwrite)"
+    fi
 fi
 
-echo "Uploading secrets..."
-echo
+if [ "$TYPE" = "variable" ]; then
+    case "$APP" in
+        codespaces|dependabot)
+            die "$APP does not support variables"
+            ;;
+    esac
+fi
 
-gh "${ARGS[@]}"
+if [ "$ACTION" = "push" ] && [ "$APP" = "agents" ]; then
+    :
+fi
 
-echo
-echo "Done."
+if [ "$ACTION" = "push" ]; then
+    if [ -n "$ENVIRONMENT" ]; then
+        if ! gh api --silent "/repos/$REPO/environments/$ENVIRONMENT" >/dev/null 2>&1; then
+            if [ "$DRY_RUN" -eq 1 ]; then
+                echo "Would create environment: $ENVIRONMENT"
+            else
+                echo "Environment '$ENVIRONMENT' does not exist."
+                echo "Creating environment..."
+                gh api --method PUT "/repos/$REPO/environments/$ENVIRONMENT" >/dev/null
+                echo "Environment created."
+            fi
+        fi
+    fi
+
+    echo "ghenv v$VERSION"
+    echo
+    echo "Source: $FILE"
+    [ -n "$REPO" ] && echo "Target: repository $REPO"
+    [ -n "$ORG" ] && echo "Target: organization $ORG"
+    [ -n "$ENVIRONMENT" ] && echo "Environment: $ENVIRONMENT"
+    [ -n "$APP" ] && echo "Application: $APP"
+    echo "Type: $TYPE"
+    echo
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "Dry run: no changes made."
+        exit 0
+    fi
+
+    if [ "$TYPE" = "secret" ]; then
+        CMD=(secret set -f "$FILE")
+    else
+        CMD=(variable set -f "$FILE")
+    fi
+
+    [ -n "$REPO" ] && CMD+=(--repo "$REPO")
+    [ -n "$ORG" ] && CMD+=(--org "$ORG")
+    [ -n "$ENVIRONMENT" ] && CMD+=(--env "$ENVIRONMENT")
+    [ -n "$APP" ] && CMD+=(--app "$APP")
+
+    echo "Uploading $TYPE..."
+    echo
+    gh "${CMD[@]}"
+    echo
+    echo "Done."
+    exit 0
+fi
+
+# Pull
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "Dry run: would pull $TYPE to $FILE"
+    exit 0
+fi
+
+# Validate environment before creating the output file.
+if [ -n "$ENVIRONMENT" ]; then
+    if ! gh api --silent "/repos/$REPO/environments/$ENVIRONMENT" >/dev/null 2>&1; then
+        die "environment '$ENVIRONMENT' does not exist"
+    fi
+fi
+
+if [ "$TYPE" = "secret" ]; then
+    ENDPOINT="/repos/$REPO/actions/secrets"
+    if [ -n "$APP" ]; then
+        case "$APP" in
+            actions) ENDPOINT="/repos/$REPO/actions/secrets" ;;
+            agents) ENDPOINT="/repos/$REPO/agents/secrets" ;;
+            codespaces) ENDPOINT="/repos/$REPO/codespaces/secrets" ;;
+            dependabot) ENDPOINT="/repos/$REPO/dependabot/secrets" ;;
+        esac
+    fi
+    if [ -n "$ENVIRONMENT" ]; then
+        ENDPOINT="/repos/$REPO/environments/$ENVIRONMENT/secrets"
+    fi
+    if [ -n "$ORG" ]; then
+        ENDPOINT="/orgs/$ORG/actions/secrets"
+    fi
+    NAMES=$(gh api --paginate "$ENDPOINT" --jq '.secrets[]?.name')
+    : > "$FILE"
+    while IFS= read -r NAME; do
+        [ -n "$NAME" ] && printf '%s=\n' "$NAME" >> "$FILE"
+    done <<EOF
+$NAMES
+EOF
+else
+    ENDPOINT="/repos/$REPO/actions/variables"
+    if [ -n "$APP" ]; then
+        case "$APP" in
+            actions) ENDPOINT="/repos/$REPO/actions/variables" ;;
+            agents) ENDPOINT="/repos/$REPO/agents/variables" ;;
+        esac
+    fi
+    if [ -n "$ENVIRONMENT" ]; then
+        ENDPOINT="/repos/$REPO/environments/$ENVIRONMENT/variables"
+    fi
+    if [ -n "$ORG" ]; then
+        ENDPOINT="/orgs/$ORG/actions/variables"
+    fi
+    gh api --paginate "$ENDPOINT" --jq '.variables[]? | [.name,.value] | @tsv' |
+    while IFS="$(printf '\t')" read -r NAME VALUE; do
+        [ -n "$NAME" ] && printf '%s=%s\n' "$NAME" "$VALUE"
+    done > "$FILE"
+fi
+
+echo "Pulled $TYPE to $FILE"
