@@ -131,7 +131,7 @@ done
 [ -n "$REPO" ] && [ -n "$ORG" ] && \
     die "use either --repo or --org, not both"
 
-[ -z "$ORG" ] && [ -n "$ENVIRONMENT" ] && \
+[ -n "$ENVIRONMENT" ] && [ -z "$REPO" ] && \
     die "--env requires --repo"
 
 [ -n "$ENVIRONMENT" ] && [ -n "$APP" ] && \
