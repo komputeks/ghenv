@@ -1,0 +1,203 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+set -e
+
+VERSION="1.0.0"
+
+usage() {
+    cat <<EOF
+ghenv v$VERSION
+
+Upload dotenv files to GitHub secrets using GitHub CLI.
+
+Usage:
+  ghenv push --repo OWNER/REPO --file FILE
+  ghenv push --repo OWNER/REPO --file FILE --env ENVIRONMENT
+  ghenv push --repo OWNER/REPO --file FILE --app APP
+  ghenv push --org ORG --file FILE --app APP
+  ghenv version
+  ghenv help
+
+Options:
+  --repo OWNER/REPO     Target repository
+  --org ORG             Target organization
+  --file FILE           dotenv file
+  --env ENV             GitHub environment
+  --app APP             actions|agents|codespaces|dependabot
+
+Examples:
+
+  ghenv push --repo OWNER/REPO --file /sdcard/secrets.env
+
+  ghenv push --repo OWNER/REPO \
+    --file /sdcard/secrets.env \
+    --env production
+
+  ghenv push --repo OWNER/REPO \
+    --file /sdcard/secrets.env \
+    --app dependabot
+
+  ghenv push --repo OWNER/REPO \
+    --file /sdcard/secrets.env \
+    --app actions
+
+  ghenv push --org OWNER \
+    --file /sdcard/secrets.env \
+    --app codespaces
+EOF
+}
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+command -v gh >/dev/null 2>&1 || die "GitHub CLI (gh) is not installed."
+
+case "${1:-}" in
+
+    version)
+        echo "ghenv v$VERSION"
+        exit 0
+        ;;
+
+    help|"")
+        usage
+        exit 0
+        ;;
+
+    push)
+        shift
+        ;;
+
+    *)
+        die "unknown command: $1"
+        ;;
+esac
+
+REPO=""
+ORG=""
+FILE=""
+ENVIRONMENT=""
+APP=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+
+        --repo|-R)
+            [ $# -ge 2 ] || die "--repo requires OWNER/REPO"
+            REPO="$2"
+            shift 2
+            ;;
+
+        --org)
+            [ $# -ge 2 ] || die "--org requires an organization"
+            ORG="$2"
+            shift 2
+            ;;
+
+        --file|-f)
+            [ $# -ge 2 ] || die "--file requires a file"
+            FILE="$2"
+            shift 2
+            ;;
+
+        --env|-e)
+            [ $# -ge 2 ] || die "--env requires an environment name"
+            ENVIRONMENT="$2"
+            shift 2
+            ;;
+
+        --app|-a)
+            [ $# -ge 2 ] || die "--app requires actions, agents, codespaces, or dependabot"
+            APP="$2"
+            shift 2
+            ;;
+
+        --help|-h)
+            usage
+            exit 0
+            ;;
+
+        *)
+            die "unknown option: $1"
+            ;;
+    esac
+done
+
+[ -n "$FILE" ] || die "missing --file"
+[ -f "$FILE" ] || die "file not found: $FILE"
+
+[ -n "$REPO" ] && [ -n "$ORG" ] && \
+    die "use either --repo or --org, not both"
+
+[ -z "$ORG" ] && [ -n "$ENVIRONMENT" ] && \
+    die "--env requires --repo"
+
+[ -n "$ENVIRONMENT" ] && [ -n "$APP" ] && \
+    die "--env and --app cannot be used together"
+
+[ -n "$APP" ] || [ -n "$ORG" ] || [ -n "$REPO" ] || \
+    die "specify --repo or --org"
+
+case "$APP" in
+    "")
+        ;;
+    actions|agents|codespaces|dependabot)
+        ;;
+    *)
+        die "invalid --app: $APP"
+        ;;
+esac
+
+echo "ghenv v$VERSION"
+echo
+echo "Source: $FILE"
+
+if [ -n "$REPO" ]; then
+    echo "Target: repository $REPO"
+elif [ -n "$ORG" ]; then
+    echo "Target: organization $ORG"
+fi
+
+if [ -n "$ENVIRONMENT" ]; then
+    echo "Environment: $ENVIRONMENT"
+fi
+
+if [ -n "$APP" ]; then
+    echo "Application: $APP"
+fi
+
+echo
+
+if [ -n "$REPO" ]; then
+
+    ARGS=(secret set -f "$FILE" --repo "$REPO")
+
+    if [ -n "$ENVIRONMENT" ]; then
+        ARGS+=(--env "$ENVIRONMENT")
+    fi
+
+    if [ -n "$APP" ]; then
+        ARGS+=(--app "$APP")
+    fi
+
+elif [ -n "$ORG" ]; then
+
+    ARGS=(secret set -f "$FILE" --org "$ORG")
+
+    if [ -n "$APP" ]; then
+        ARGS+=(--app "$APP")
+    fi
+
+else
+    die "no target specified"
+fi
+
+echo "Uploading secrets..."
+echo
+
+gh "${ARGS[@]}"
+
+echo
+echo "Done."
